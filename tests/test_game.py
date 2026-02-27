@@ -38,13 +38,11 @@ def test_discard_matching():
     assert room.players[0].hand[0] is None
 
 
-def test_discard_fail_card_goes_to_hand():
-    """On failed discard attempt, drawn card is added to player hand (penalty)."""
+def test_discard_fail_requires_keep_or_replace():
     room = GameRoom('TEST', seed=0)
     room.add_player('p1', 'Alice')
     room.add_player('p2', 'Bob')
     room.start_game()
-    hand_size_before = len(room.players[0].hand)
     test_card = Card(rank=Rank.FIVE, suit=Suit.HEARTS)
     non_matching = Card(rank=Rank.SEVEN, suit=Suit.CLUBS)
     room.players[0].hand[0] = test_card
@@ -52,9 +50,26 @@ def test_discard_fail_card_goes_to_hand():
     room.turn_index = 0
     result = room.attempt_discard('p1', 0)
     assert result['success'] is False
-    # Hand grows by 1 (penalty)
-    assert len(room.players[0].hand) == hand_size_before + 1
-    assert room.players[0].hand[-1].rank == Rank.SEVEN
+    assert result['next_action_required'] == 'keep_or_replace'
+    # turn does not advance until keep/replace decision
+    assert room.current_player.id == 'p1'
+
+
+
+def test_replace_card_swaps_with_drawn_card():
+    room = GameRoom('TEST', seed=0)
+    room.add_player('p1', 'Alice')
+    room.add_player('p2', 'Bob')
+    room.start_game()
+    old_card = Card(rank=Rank.FIVE, suit=Suit.HEARTS)
+    drawn = Card(rank=Rank.SEVEN, suit=Suit.CLUBS)
+    room.players[0].hand[0] = old_card
+    room.pending_special = {'type': 'drawn', 'player_id': 'p1', 'card': drawn}
+    room.turn_index = 0
+    result = room.replace_card('p1', 0)
+    assert result['replaced'] is True
+    assert room.players[0].hand[0].rank == Rank.SEVEN
+    assert room.discard_pile[-1].rank == Rank.FIVE
 
 
 def test_keep_card_discards_drawn():
@@ -139,6 +154,23 @@ def test_rikiki_auto_lose():
     assert result['caller_auto_lose'] is True
     assert result['winner_id'] == 'p2'
 
+
+def test_rikiki_threshold_is_seven():
+    room = GameRoom('TEST', seed=0)
+    room.add_player('p1', 'Alice')
+    room.add_player('p2', 'Bob')
+    room.start_game()
+    room.players[0].hand = [
+        Card(rank=Rank.FOUR, suit=Suit.CLUBS),
+        Card(rank=Rank.THREE, suit=Suit.HEARTS),
+    ]
+    room.players[1].hand = [
+        Card(rank=Rank.ACE, suit=Suit.DIAMONDS),
+    ]
+    room.players[0].called_rikiki = True
+    room.rikiki_called_by = 'p1'
+    result = room.end_game()
+    assert result['caller_auto_lose'] is False
 
 def test_king_peek_and_swap():
     room = GameRoom('TEST', seed=0)
