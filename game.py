@@ -4,6 +4,7 @@ from typing import Optional
 from models import Card, Rank, Suit, GameState, ActionLog
 
 GRID_SIZE = 4  # 2x2 = 4 cards per player
+CALLER_AUTO_LOSE_SCORE = 7
 
 
 def build_deck(seed: Optional[int] = None) -> list[Card]:
@@ -172,12 +173,39 @@ class GameRoom:
             self._advance_turn()
             return {"success": True, "discarded": [drawn_card.dict_private(), hand_card.dict_private()]}
         else:
-            # Failed attempt: drawn card is ADDED to hand (player keeps it as penalty)
-            player.hand.append(drawn_card)
-            self.pending_special = None
+            # Failed attempt: player keeps the drawn card pending and must choose
+            # whether to discard it or replace one owned card.
             self._log(player_id, "discard_fail", {"position": position})
-            self._advance_turn()
-            return {"success": False, "kept": drawn_card.dict_private()}
+            return {
+                "success": False,
+                "drawn": drawn_card.dict_private(),
+                "next_action_required": "keep_or_replace",
+            }
+
+    def replace_card(self, player_id: str, position: int) -> dict:
+        """Replace one owned card with the pending drawn card."""
+        player = self._validate_turn(player_id)
+        if not self.pending_special or self.pending_special.get("type") != "drawn":
+            raise ValueError("No card drawn yet")
+
+        if position < 0 or position >= len(player.hand):
+            raise ValueError("Invalid position")
+
+        current_card = player.hand[position]
+        if current_card is None:
+            raise ValueError("No card at position")
+
+        drawn_card: Card = self.pending_special["card"]
+        player.hand[position] = drawn_card
+        self.discard_pile.append(current_card)
+        self.pending_special = None
+        self._log(player_id, "replace_card", {"position": position})
+        self._advance_turn()
+        return {
+            "replaced": True,
+            "position": position,
+            "new_card": drawn_card.dict_private(),
+        }
 
     def keep_card(self, player_id: str) -> dict:
         """Discard the drawn card without attempting a swap.
@@ -363,7 +391,7 @@ class GameRoom:
             })
 
         caller_score = caller.score() if caller else None
-        caller_auto_lose = caller_score is not None and caller_score > 11
+        caller_auto_lose = caller_score is not None and caller_score > CALLER_AUTO_LOSE_SCORE
 
         if caller_auto_lose:
             winner_id = min(

@@ -103,6 +103,13 @@ async def handle_message(ws: WebSocket, data: dict, room_code: str, player_id: s
             await send_private_state(ws, room, player_id)
             await broadcast_public_state(room)
 
+        elif action == "replace_card":
+            position = int(payload["position"])
+            result = room.replace_card(player_id, position)
+            await ws.send_text(json.dumps({"type": "action_result", "data": {"action": "replace_card", **result}}))
+            await send_private_state(ws, room, player_id)
+            await broadcast_public_state(room)
+
         elif action == "use_jack":
             target_id = payload["target_player_id"]
             position = int(payload["position"])
